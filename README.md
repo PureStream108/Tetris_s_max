@@ -17,3 +17,6 @@ g++ -static main.c renderer.c game_logic.c input.c tetromino.c iob_fix.c resourc
 ```bash
 g++ main.c renderer.c game_logic.c input.c tetromino.c iob_fix.c resource.o -o tetris.exe -I./include -I"C:\msys64\mingw64\include" -L"C:\msys64\mingw64\lib" -leasyxw -lgdi32 -lole32 -luser32 -lwinmm -lcomdlg32 -lmsimg32 -DUNICODE -D_UNICODE
 ```
+
+## 注意事项
+打开exe之后有两个窗口，关闭游戏时记得都关闭！第一次打开时记得关闭音量
