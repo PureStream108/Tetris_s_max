@@ -6,7 +6,8 @@
 // 函数原型
 
 // 初始化一个随机类型的方块
-void spawn_block(Block *block);
+// restrictPieces: 如果为 true，只生成 Z 和 S 方块 (用于 PM-EX-3)
+void spawn_block(Block *block, bool restrictPieces);
 
 // 获取指定类型和旋转角度的方块相对坐标
 void get_block_shape(BlockType type, int rotation, Point output[4]);

@@ -13,6 +13,9 @@ void update_window_size();
 
 void reload_background();
 
+void draw_background();
+void draw_dim_overlay(int alpha);
+
 //  绘制图选
 void draw_intro();
 

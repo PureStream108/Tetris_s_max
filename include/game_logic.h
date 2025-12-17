@@ -6,6 +6,9 @@
 // 初始化玩家状态
 void init_player(PlayerState *p, int id);
 
+// 启动指定关卡 (处理初始化、限制条件、地形生成)
+void start_level(PlayerState *p, int playerId, int levelId);
+
 // 游戏逻辑更新（重力下落等）
 void update_game(PlayerState *p);
 

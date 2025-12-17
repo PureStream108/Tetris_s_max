@@ -1,23 +1,23 @@
-#include "tetromino.h"
+#include "include/tetromino.h"
+#include <stdlib.h> // for rand
 
-// Definition of basic shapes (Rotation 0)
-// Relative coordinates to the pivot (0,0)
-// 基础形状定义（相对中心点(0,0)的坐标）
-// Y is positive downwards
+// 基础形状定义 (旋转 0)
+// 相对中心点 (0,0) 的坐标
+// Y 轴向下为正
 static const Point SHAPES[7][4] = {
-    // I: Horizontal
+    // I: 水平
     { {-1, 0}, {0, 0}, {1, 0}, {2, 0} },
-    // O: Square
+    // O: 正方形
     { {0, 0}, {1, 0}, {0, 1}, {1, 1} },
-    // T: T-shape pointing Up (visually) -> Y-1 is Up
+    // T: T型 朝上 (视觉上) -> Y-1 是上
     { {-1, 0}, {0, 0}, {1, 0}, {0, -1} },
-    // L: L-shape
-    { {-1, 0}, {0, 0}, {1, 0}, {-1, -1} }, // Top-left stick
-    // J: J-shape
-    { {-1, 0}, {0, 0}, {1, 0}, {1, -1} }, // Top-right stick
-    // S: S-shape
+    // L: L型
+    { {-1, 0}, {0, 0}, {1, 0}, {-1, -1} }, // 左上角
+    // J: J型
+    { {-1, 0}, {0, 0}, {1, 0}, {1, -1} }, // 右上角
+    // S: S型
     { {-1, 0}, {0, 0}, {0, -1}, {1, -1} },
-    // Z: Z-shape
+    // Z: Z型
     { {-1, -1}, {0, -1}, {0, 0}, {1, 0} }
 };
 
@@ -25,7 +25,7 @@ static const COLORREF COLORS[7] = {
     CYAN,       // I
     YELLOW,     // O
     MAGENTA,    // T
-    RGB(255, 165, 0), // L (Orange)
+    RGB(255, 165, 0), // L (橙色)
     BLUE,       // J
     GREEN,      // S
     RED         // Z
@@ -37,16 +37,16 @@ COLORREF get_block_color(BlockType type) {
 }
 
 void get_block_shape(BlockType type, int rotation, Point output[4]) {
-    // Start with base shape
+    // 从基础形状开始
     for (int i = 0; i < 4; i++) {
         output[i] = SHAPES[type][i];
     }
 
-    // O block doesn't rotate
+    // O 方块不旋转
     if (type == BLOCK_O) return;
 
-    // Apply rotation
-    // 90 degree clockwise: x' = -y, y' = x
+    // 应用旋转
+    // 顺时针 90 度: x' = -y, y' = x
     for (int r = 0; r < rotation % 4; r++) {
         for (int i = 0; i < 4; i++) {
             int tmpX = output[i].x;
@@ -56,11 +56,17 @@ void get_block_shape(BlockType type, int rotation, Point output[4]) {
     }
 }
 
-void spawn_block(Block *block) {
-    block->type = (BlockType)(rand() % 7);
-    block->rotation = 0; // rand() % 4; // Usually start flat
-    block->x = BOARD_COLS / 2 - 1; // Center roughly
-    block->y = 0; // Top
+void spawn_block(Block *block, bool restrictPieces) {
+    if (restrictPieces) {
+        // 只生成 S (5) 和 Z (6)
+        block->type = (rand() % 2 == 0) ? BLOCK_S : BLOCK_Z;
+    } else {
+        block->type = (BlockType)(rand() % 7);
+    }
+    
+    block->rotation = 0; // 通常平放开始
+    block->x = BOARD_COLS / 2 - 1; // 大致居中
+    block->y = 0; // 顶部
     block->color = get_block_color(block->type);
     
     get_block_shape(block->type, block->rotation, block->shape);

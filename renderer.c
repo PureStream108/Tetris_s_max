@@ -1,5 +1,6 @@
-#include "renderer.h"
-#include "tetromino.h"
+#include "include/renderer.h"
+#include "include/tetromino.h"
+#include "include/levels.h"
 
 // 链接 Msimg32.lib 以使用 AlphaBlend 函数
 #pragma comment(lib, "Msimg32.lib")
@@ -91,7 +92,7 @@ void draw_dim_overlay(int alpha) {
 void init_game_window() {
     initgraph(g_windowWidth, g_windowHeight);
     setbkmode(TRANSPARENT); 
-    settextstyle(20, 0, _T("SimHei"));
+    settextstyle(20, 0, _T("SimHei")); // 使用黑体
     
     // 初始化遮罩资源
     init_overlay_resources();
@@ -238,8 +239,17 @@ void draw_info(PlayerState *p, int startX, int startY) {
     _stprintf_s(buf, 64, _T("Level: %d"), p->level);
     outtextxy(startX, startY + 30, buf);
     
-    _stprintf_s(buf, 64, _T("Lines: %d"), p->linesCleared);
-    outtextxy(startX, startY + 60, buf);
+    // 关卡模式显示目标剩余行数
+    extern GameState g_gameState;
+    if (g_gameState == STATE_GAME_LEVEL) {
+        int left = p->levelTargetLines - p->linesCleared;
+        if (left < 0) left = 0;
+        _stprintf_s(buf, 64, _T("Target Left: %d"), left);
+        outtextxy(startX, startY + 60, buf);
+    } else {
+        _stprintf_s(buf, 64, _T("Lines: %d"), p->linesCleared);
+        outtextxy(startX, startY + 60, buf);
+    }
     
     outtextxy(startX, startY + 100, _T("Next:"));
     draw_block(&p->nextBlock, startX, startY + 130, true);
@@ -260,6 +270,7 @@ void draw_key_guide(int startX, int startY) {
     outtextxy(startX, startY + lineHeight * 5, _T("W/S: 调整等级 (Level)"));
     outtextxy(startX, startY + lineHeight * 6, _T("Space: 暂停 (Pause)"));
     outtextxy(startX, startY + lineHeight * 7, _T("ESC: 返回 (Back)"));
+    outtextxy(startX, startY + lineHeight * 8, _T("R: 重新开始 (Restart)"));
 }
 
 // 绘制暂停界面遮罩
@@ -313,8 +324,6 @@ void draw_music_ticker() {
     }
     
     // 绘制顶部半透明黑条
-    // 这里我们手动绘制一个小区域的半透明条不太容易用 draw_dim_overlay (全屏)
-    // 所以直接用 solidrectangle 画一个深灰色的底条
     setfillcolor(RGB(30, 30, 30));
     setlinecolor(RGB(30, 30, 30));
     fillrectangle(0, 0, g_windowWidth, barH);
@@ -325,13 +334,7 @@ void draw_music_ticker() {
     // 从右往左滚动
     int drawX = g_windowWidth - offsetX;
     
-    // 简单的循环滚动效果
-    // 当文字完全移出左边时，可以从右边再出来
-    // 这里我们只画一次，offsetX 循环处理
-    
     outtextxy(drawX, 4, displayStr);
-    
-    // 如果文字很短，可以紧接着画第二次以实现无缝，这里简化处理
 }
 
 void render_game(PlayerState *p1, PlayerState *p2, GameMode mode, int timeLeft, int gameTime, Button* pauseButtons, int pauseBtnCount, int pauseHoverIdx) {
@@ -346,7 +349,7 @@ void render_game(PlayerState *p1, PlayerState *p2, GameMode mode, int timeLeft, 
     
     bool isPaused = false;
     
-    if (mode == MODE_SINGLE) {
+    if (mode == MODE_SINGLE || mode == MODE_LEVEL) { // 单人或关卡模式
         draw_board(p1, sp_x, sp_y);
         draw_info(p1, sp_x + BOARD_COLS * g_blockSize + 20, sp_y);
         
@@ -354,6 +357,49 @@ void render_game(PlayerState *p1, PlayerState *p2, GameMode mode, int timeLeft, 
         draw_key_guide(50, 100);
         
         if (p1->isPaused) isPaused = true;
+
+        // 关卡模式浮动标题动画
+        if (mode == MODE_LEVEL) {
+            clock_t now = clock();
+            double elapsed = (double)(now - p1->levelStartTime) / CLOCKS_PER_SEC;
+            
+            // 动画时长：前0.5s淡入，停留2s，后0.5s淡出，总共3s
+            if (elapsed < 3.0) {
+                int alpha = 0;
+                if (elapsed < 0.5) {
+                    alpha = (int)(elapsed / 0.5 * 255);
+                } else if (elapsed < 2.5) {
+                    alpha = 255;
+                } else {
+                    alpha = (int)((3.0 - elapsed) / 0.5 * 255);
+                }
+                
+                // 绘制标题
+                LevelData* level = get_level_data((LevelID)p1->currentLevelIndex);
+                if (level) {
+                    settextstyle(60, 0, _T("SimHei"));
+                    
+                    // 手动模拟 alpha 颜色 (白字)
+                    // 背景是动态的，所以最好不要用 settextcolor(RGB(alpha,alpha,alpha))，这只是变灰
+                    // 真正的 alpha 混合需要 buffer，这里简单地用灰色模拟淡入淡出
+                    settextcolor(RGB(alpha, alpha, alpha)); 
+                    
+                    TCHAR wTitle[64];
+                    #ifdef UNICODE
+                        _tcscpy(wTitle, level->title);
+                    #else
+                        strcpy(wTitle, level->title);
+                    #endif
+                    
+                    int tx = (g_windowWidth - textwidth(wTitle)) / 2;
+                    int ty = g_windowHeight / 2 - 100;
+                    
+                    setbkmode(TRANSPARENT);
+                    outtextxy(tx, ty, wTitle);
+                }
+            }
+        }
+
     } else {
         // 双人模式布局调整：完全基于窗口宽度的百分比，适应任何分辨率
         int boardWidth = BOARD_COLS * g_blockSize;
@@ -394,15 +440,38 @@ void render_game(PlayerState *p1, PlayerState *p2, GameMode mode, int timeLeft, 
     if (isPaused) {
         draw_pause_overlay(pauseButtons, pauseBtnCount, pauseHoverIdx);
     }
+
+    // 绘制关卡胜利/失败弹窗 (如果处于该状态)
+    extern GameState g_gameState;
+    if (g_gameState == STATE_GAME_LEVEL_WIN) {
+        draw_dim_overlay(150);
+        
+        const TCHAR* msg;
+        // PM-10 胜利显示特殊文案
+        if (p1->currentLevelIndex == LEVEL_10) {
+             // 字体稍微调小一点防止溢出
+            settextstyle(40, 0, _T("SimHei")); 
+            settextcolor(GREEN);
+            msg = _T("0xGame{C@ll_PureSt34m_QQ_t0_Get_Vme50}");
+        } else {
+            settextstyle(60, 0, _T("SimHei"));
+            settextcolor(GREEN);
+            msg = _T("Congratulations!");
+        }
+
+        outtextxy((g_windowWidth - textwidth(msg))/2, g_windowHeight/2 - 50, msg);
+        
+        settextstyle(24, 0, _T("SimHei"));
+        settextcolor(WHITE);
+        const TCHAR* sub = _T("按 ENTER 继续 / ESC 返回");
+        outtextxy((g_windowWidth - textwidth(sub))/2, g_windowHeight/2 + 50, sub);
+    }
     
     EndBatchDraw();
 }
 
 void draw_button(const Button* btn, bool isHover) {
-    // 设置半透明深色底 (使用 RGB 模拟，不支持直接 alpha 填充，但我们可以画得深一点)
-    // EasyX 默认绘图不带 Alpha，除非用 PutImage + AlphaBlend
-    // 这里我们用一种深灰色作为底色，并在 Hover 时变亮
-    
+    // 设置半透明深色底
     COLORREF fillColor = isHover ? RGB(80, 80, 80) : RGB(30, 30, 30);
     COLORREF borderColor = isHover ? RGB(255, 255, 0) : RGB(200, 200, 200); // Hover 时边框变黄
     
@@ -625,7 +694,7 @@ void draw_game_over(PlayerState *p1, PlayerState *p2, GameMode mode) {
     settextstyle(40, 0, _T("SimHei"));
     settextcolor(WHITE);
     
-    if (mode == MODE_SINGLE) {
+    if (mode == MODE_SINGLE || mode == MODE_LEVEL) {
         const TCHAR* msg = _T("GAME OVER");
         outtextxy(cx - textwidth(msg)/2, cy - 20, msg);
     } else {

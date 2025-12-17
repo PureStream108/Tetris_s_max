@@ -1,14 +1,17 @@
-#include "game_logic.h"
-#include "tetromino.h"
+#include "include/game_logic.h"
+#include "include/tetromino.h"
+#include "include/levels.h" // 引入关卡相关定义
 
-// Forward declaration
+// 前向声明
 void lock_block(PlayerState *p);
 void clear_lines(PlayerState *p);
 void spawn_next_block(PlayerState *p);
 
 Leaderboard g_leaderboard = {0};
 
-// Helper to update speed based on level and difficulty
+extern GameState g_gameState; // 需要访问全局游戏状态
+
+// 辅助函数：根据等级和难度更新速度
 void update_speed(PlayerState *p) {
     int baseSpeed = 1000;
     int decrement = 100;
@@ -34,13 +37,16 @@ void init_player(PlayerState *p, int id) {
     p->isGameOver = false;
     p->isWinner = false;
     p->isPaused = false;
+    p->restrictPieces = false; // 默认不限制
+    p->levelTargetLines = 9999; // 默认无限
+    p->levelStartTime = clock();
     
-    // Set initial drop interval
+    // 设置初始下落间隔
     update_speed(p);
     
     p->lastDropTime = clock();
     
-    // Clear board
+    // 清空棋盘
     for (int r = 0; r < BOARD_ROWS; r++) {
         for (int c = 0; c < BOARD_COLS; c++) {
             p->board[r][c] = 0;
@@ -48,22 +54,41 @@ void init_player(PlayerState *p, int id) {
         }
     }
     
-    // Spawn initial blocks
-    spawn_block(&p->currentBlock);
-    spawn_block(&p->nextBlock);
+    // 生成初始方块 (如果 restrictPieces 在此之后被修改，调用者需要重新生成)
+    spawn_block(&p->currentBlock, p->restrictPieces);
+    spawn_block(&p->nextBlock, p->restrictPieces);
 }
 
-// Check collision for a specific block state
-// 碰撞检测
+void start_level(PlayerState *p, int playerId, int levelId) {
+    // 1. 基础初始化
+    init_player(p, playerId);
+    
+    // 2. 应用关卡配置
+    p->currentLevelIndex = levelId;
+    p->levelTargetLines = g_levels[levelId].targetLines;
+    p->restrictPieces = g_levels[levelId].restrictPieces;
+    
+    // 3. 如果有限制条件，重新生成初始方块
+    // (因为 init_player 默认用 restrictPieces=false 生成了一次)
+    if (p->restrictPieces) {
+        spawn_block(&p->currentBlock, true);
+        spawn_block(&p->nextBlock, true);
+    }
+    
+    // 4. 生成关卡地形
+    generate_level_garbage(p, (LevelID)levelId);
+}
+
+// 检查特定方块状态的碰撞
 bool check_collision(PlayerState *p, Block *b) {
     for (int i = 0; i < 4; i++) {
         int bx = b->x + b->shape[i].x;
         int by = b->y + b->shape[i].y;
         
-        // Boundaries
+        // 边界检查
         if (bx < 0 || bx >= BOARD_COLS || by >= BOARD_ROWS) return true;
         
-        // Occupied cells (Ignore if by < 0, meaning above board)
+        // 占用检查 (忽略 by < 0，即在棋盘上方的情况)
         if (by >= 0 && p->board[by][bx] != 0) return true;
     }
     return false;
@@ -119,7 +144,7 @@ void lock_block(PlayerState *p) {
         int by = b->y + b->shape[i].y;
         
         if (by >= 0 && by < BOARD_ROWS && bx >= 0 && bx < BOARD_COLS) {
-            p->board[by][bx] = 1; // Mark occupied
+            p->board[by][bx] = 1; // 标记占用
             p->boardColors[by][bx] = b->color;
         }
     }
@@ -139,19 +164,19 @@ void clear_lines(PlayerState *p) {
         
         if (full) {
             lines++;
-            // Shift down
+            // 下移上方行
             for (int nr = r; nr > 0; nr--) {
                 for (int c = 0; c < BOARD_COLS; c++) {
                     p->board[nr][c] = p->board[nr - 1][c];
                     p->boardColors[nr][c] = p->boardColors[nr - 1][c];
                 }
             }
-            // Clear top row
+            // 清空顶行
             for (int c = 0; c < BOARD_COLS; c++) {
                 p->board[0][c] = 0;
                 p->boardColors[0][c] = BLACK;
             }
-            r++; // Check this row again (since it's now the one from above)
+            r++; // 重新检查这一行 (因为它现在是上面掉下来的那一行)
         }
     }
     
@@ -167,46 +192,60 @@ void clear_lines(PlayerState *p) {
             p->score += (lines + 1) * 100;
         }
         
-        // Level up every 10 lines
-        // Note: 如果玩家手动调整了等级，这里可能会覆盖手动调整，
-        // 但通常自动升级是预期行为。如果想要完全手动控制，可以注释掉这里的升级逻辑。
-        // 这里保留自动升级，但确保不超过最大等级。
-        int newLevel = 1 + p->linesCleared / LINES_PER_LEVEL;
-        if (newLevel > MAX_LEVEL) newLevel = MAX_LEVEL;
-        
-        // 只有当计算出的等级高于当前等级时才升级 (避免降级，如果用户手动调高了等级)
-        if (newLevel > p->level) {
-            p->level = newLevel;
-            update_speed(p);
+        // 关卡模式：检查是否达成目标
+        if (g_gameState == STATE_GAME_LEVEL) {
+            if (p->linesCleared >= p->levelTargetLines) {
+                p->isWinner = true;
+                g_gameState = STATE_GAME_LEVEL_WIN;
+                
+                // 记录完成并解锁下一关
+                set_level_completed((LevelID)p->currentLevelIndex, true);
+                unlock_next_level((LevelID)p->currentLevelIndex);
+            }
+            // 关卡模式下不自动增加难度等级 (或者可以增加，取决于设计，这里暂时不增加以免过于复杂)
+            // 如果希望随着行数增加速度，可以保留下面的逻辑
+        } else {
+            // 普通模式：每10行升级
+            int newLevel = 1 + p->linesCleared / LINES_PER_LEVEL;
+            if (newLevel > MAX_LEVEL) newLevel = MAX_LEVEL;
+            
+            if (newLevel > p->level) {
+                p->level = newLevel;
+                update_speed(p);
+            }
         }
     }
 }
 
 void spawn_next_block(PlayerState *p) {
     p->currentBlock = p->nextBlock;
-    spawn_block(&p->nextBlock);
+    // 使用 restrictPieces 参数
+    spawn_block(&p->nextBlock, p->restrictPieces);
     
-    // Check if new block collides immediately -> Game Over
+    // 检查新生成的方块是否立即碰撞 -> 游戏结束
     if (check_collision(p, &p->currentBlock)) {
         p->isGameOver = true;
     }
 }
 
 void update_game(PlayerState *p) {
-    if (p->isGameOver || p->isPaused) {
-        // Update lastDropTime so that when unpaused, it doesn't drop immediately due to large delta
+    if (p->isGameOver || p->isPaused || p->isWinner) {
+        // 更新 lastDropTime 以免暂停恢复后立即下落
         p->lastDropTime = clock();
         return;
     }
     
     clock_t now = clock();
     if (now - p->lastDropTime > p->dropInterval) {
-        // Try to move down
+        // 尝试下落
         if (!move_block(p, 0, 1)) {
-            // Landed
+            // 落地
             lock_block(p);
             clear_lines(p);
-            spawn_next_block(p);
+            // 只有当游戏未结束且未胜利时才生成下一个
+            if (!p->isGameOver && !p->isWinner) {
+                spawn_next_block(p);
+            }
         }
         p->lastDropTime = now;
     }
@@ -216,7 +255,7 @@ bool check_game_over(PlayerState *p) {
     return p->isGameOver;
 }
 
-// --- Leaderboard Implementation ---
+// --- 排行榜实现 ---
 
 void load_leaderboard() {
     FILE* f = fopen("leaderboard.dat", "rb");
@@ -236,31 +275,31 @@ void save_leaderboard() {
     }
 }
 
-// Compare for qsort (descending score)
+// qsort 比较函数 (降序)
 int compare_entries(const void* a, const void* b) {
     return ((LeaderboardEntry*)b)->score - ((LeaderboardEntry*)a)->score;
 }
 
 void add_to_leaderboard(int score) {
-    // If full and score is lower than lowest, ignore
+    // 如果已满且分数低于最低分，忽略
     if (g_leaderboard.count == MAX_LEADERBOARD_ENTRIES && score <= g_leaderboard.entries[MAX_LEADERBOARD_ENTRIES-1].score) {
         return;
     }
     
-    // Add entry
+    // 添加条目
     int idx = g_leaderboard.count;
     if (idx < MAX_LEADERBOARD_ENTRIES) {
         g_leaderboard.count++;
     } else {
-        idx = MAX_LEADERBOARD_ENTRIES - 1; // Overwrite last
+        idx = MAX_LEADERBOARD_ENTRIES - 1; // 覆盖最后一个
     }
     
-    // Simple default name, in real app could ask user
+    // 简单的默认名字
     strcpy(g_leaderboard.entries[idx].name, "Player");
     g_leaderboard.entries[idx].score = score;
     g_leaderboard.entries[idx].date = time(NULL);
     
-    // Sort
+    // 排序
     qsort(g_leaderboard.entries, g_leaderboard.count, sizeof(LeaderboardEntry), compare_entries);
     
     save_leaderboard();

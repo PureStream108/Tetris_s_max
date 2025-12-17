@@ -1,8 +1,11 @@
-#include "common.h"
-#include "renderer.h"
-#include "game_logic.h"
-#include "input.h"
-#include "tetromino.h"
+#include "include/common.h"
+#include "include/renderer.h"
+#include "include/game_logic.h"
+#include "include/input.h"
+#include "include/tetromino.h"
+#include "include/levels.h"
+#include "include/scene_level_select.h"
+#include "include/scene_story.h"
 #include <mmsystem.h> 
 #include <commdlg.h> // 文件对话框支持
 
@@ -17,6 +20,7 @@ GameSettings g_settings = {
     _T(""),         // bgImagePath
     43,             // bgOpacity (默认 26%)
     150,            // musicVolume (默认 150 = 15%)
+    0,              // maxUnlockedLevel
     BASE_WINDOW_WIDTH, // windowWidth (默认)
     BASE_WINDOW_HEIGHT // windowHeight (默认)
 };
@@ -24,14 +28,20 @@ GameSettings g_settings = {
 // 全局变量：双人模式时间限制 (默认 60秒)
 int g_dualTimeLimit = 60;
 
+// 全局游戏状态 (供其他模块访问)
+GameState g_gameState = STATE_MENU;
+PlayerState g_player1;
+PlayerState g_player2; // 仅用于双人
+
 // 按钮定义
-#define BTN_MENU_COUNT 5
+#define BTN_MENU_COUNT 6
 Button menuButtons[BTN_MENU_COUNT] = {
     {0, 300, 300, 50, _T("单人游戏 (1 Player)")},
     {0, 370, 300, 50, _T("双人对战 (2 Players)")},
-    {0, 440, 300, 50, _T("排行榜 (Leaderboard)")},
-    {0, 510, 300, 50, _T("设置 (Settings)")},
-    {0, 580, 300, 50, _T("退出 (Exit)")}
+    {0, 440, 300, 50, _T("关卡模式 (Level Mode)")},
+    {0, 510, 300, 50, _T("排行榜 (Leaderboard)")},
+    {0, 580, 300, 50, _T("设置 (Settings)")},
+    {0, 650, 300, 50, _T("退出 (Exit)")}
 };
 
 #define BTN_SETTINGS_COUNT 7
@@ -454,6 +464,33 @@ int main() {
     
     // 加载用户设置 (包括窗口大小)
     load_settings();
+
+    // 校验 maxUnlockedLevel 和 窗口尺寸，防止旧存档导致的数据异常
+    if (g_settings.maxUnlockedLevel < 0 || g_settings.maxUnlockedLevel >= LEVEL_COUNT) {
+        g_settings.maxUnlockedLevel = 0; // 重置为 0
+    }
+    if (g_settings.maxUnlockedStoryLevel < 0 || g_settings.maxUnlockedStoryLevel >= LEVEL_COUNT) {
+        g_settings.maxUnlockedStoryLevel = 0;
+    }
+    if (g_settings.windowWidth < 400 || g_settings.windowWidth > 3000) {
+        g_settings.windowWidth = BASE_WINDOW_WIDTH;
+    }
+    if (g_settings.windowHeight < 300 || g_settings.windowHeight > 2000) {
+        g_settings.windowHeight = BASE_WINDOW_HEIGHT;
+    }
+
+    // [NEW] 初始化关卡数据
+    init_levels();
+    // 恢复已解锁关卡状态
+    for (int i = 0; i <= g_settings.maxUnlockedLevel; i++) {
+        if (i < LEVEL_COUNT) g_levels[i].isUnlocked = true;
+    }
+    // 第一关永远解锁
+    g_levels[0].isUnlocked = true;
+    
+    // 确保剧情解锁状态正确 (注意：这里我们暂时没有在 LevelData 里存 isStoryUnlocked，
+    // 而是会在 scene_story.c 里直接用 maxUnlockedStoryLevel 判断)
+    // 但为了逻辑一致性，如果以后加了 isStoryUnlocked，这里也要初始化
     
     // 自动扫描 images 文件夹并设置背景 (如果没有背景或为了强制默认)
     // 用户需求："每次游戏启动的时候只读images下的第一张图片"
@@ -472,8 +509,9 @@ int main() {
     // [FIX] 显式调用 reload_background 确保在窗口初始化后应用已加载的背景图设置
     reload_background();
     
-    // 注意：不要在这里再次 SetWindowLong，renderer.c 中已经封装好了
-    // 并且每次 resize 后都会重新应用，避免样式丢失
+    // 初始化选关场景
+    init_level_select();
+    init_story_scene();
     
     center_buttons(menuButtons, BTN_MENU_COUNT);
     center_buttons(settingsButtons, BTN_SETTINGS_COUNT);
@@ -487,10 +525,10 @@ int main() {
     // 播放音乐
     update_music();
 
-    GameState currentState = STATE_MENU;
+    // 状态机
+    g_gameState = STATE_MENU;
     GameMode selectedMode = MODE_SINGLE;
     
-    PlayerState p1, p2;
     clock_t gameStartTime;
     bool quitApp = false;
     
@@ -553,17 +591,19 @@ int main() {
             }
         }
 
-        if (currentState == STATE_MENU) {
+        // 根据状态分发处理
+        if (g_gameState == STATE_MENU) {
             static int hoverIdx = -1;
             draw_menu(menuButtons, BTN_MENU_COUNT, hoverIdx);
             
             if (handle_mouse_menu(menuButtons, BTN_MENU_COUNT, &hoverIdx)) {
                 switch (hoverIdx) {
-                    case 0: selectedMode = MODE_SINGLE; currentState = STATE_GAME_SINGLE; break;
-                    case 1: selectedMode = MODE_DUAL; currentState = STATE_TIME_SELECT; break; // 进入时间选择
-                    case 2: currentState = STATE_LEADERBOARD; break;
-                    case 3: currentState = STATE_SETTINGS; break;
-                    case 4: quitApp = true; break;
+                    case 0: selectedMode = MODE_SINGLE; g_gameState = STATE_GAME_SINGLE; break;
+                    case 1: selectedMode = MODE_DUAL; g_gameState = STATE_TIME_SELECT; break; // 进入时间选择
+                    case 2: selectedMode = MODE_LEVEL; g_gameState = STATE_LEVEL_SELECT; init_level_select(); break; // 进入选关
+                    case 3: g_gameState = STATE_LEADERBOARD; break;
+                    case 4: g_gameState = STATE_SETTINGS; break;
+                    case 5: quitApp = true; break;
                 }
                 Sleep(200);
             }
@@ -577,7 +617,29 @@ int main() {
             
             Sleep(10);
         }
-        else if (currentState == STATE_TIME_SELECT) {
+        else if (g_gameState == STATE_LEVEL_SELECT) {
+            ExMessage msg = {0};
+            while (peekmessage(&msg, EX_MOUSE)) {
+                handle_level_select_input(&msg);
+            }
+            // handle_level_select_input 可能修改 g_gameState (进入游戏或返回菜单)
+            // 如果进入游戏，它已经调用了 init_player
+            
+            if (g_gameState == STATE_LEVEL_SELECT) { // 如果还在当前状态
+                update_level_select();
+                draw_level_select();
+            }
+            Sleep(10);
+        }
+        else if (g_gameState == STATE_STORY) {
+            ExMessage msg = {0};
+            while (peekmessage(&msg, EX_MOUSE | EX_KEY)) {
+                 handle_story_input(&msg);
+            }
+            draw_story_scene();
+            Sleep(10);
+        }
+        else if (g_gameState == STATE_TIME_SELECT) {
             static int hoverIdx = -1;
             // 使用临时函数名，稍后在 renderer.c 中实现
             extern void draw_time_select_menu(Button* buttons, int buttonCount, int hoverIndex);
@@ -585,43 +647,43 @@ int main() {
             
             if (handle_mouse_menu(timeSelectButtons, BTN_TIME_SELECT_COUNT, &hoverIdx)) {
                 switch (hoverIdx) {
-                    case 0: g_dualTimeLimit = 60; currentState = STATE_GAME_DUAL; break;
-                    case 1: g_dualTimeLimit = 300; currentState = STATE_GAME_DUAL; break;
-                    case 2: g_dualTimeLimit = 600; currentState = STATE_GAME_DUAL; break;
-                    case 3: g_dualTimeLimit = -1; currentState = STATE_GAME_DUAL; break;
-                    case 4: currentState = STATE_MENU; break;
+                    case 0: g_dualTimeLimit = 60; g_gameState = STATE_GAME_DUAL; break;
+                    case 1: g_dualTimeLimit = 300; g_gameState = STATE_GAME_DUAL; break;
+                    case 2: g_dualTimeLimit = 600; g_gameState = STATE_GAME_DUAL; break;
+                    case 3: g_dualTimeLimit = -1; g_gameState = STATE_GAME_DUAL; break;
+                    case 4: g_gameState = STATE_MENU; break;
                 }
                 Sleep(200);
             }
             
             if (GetAsyncKeyState(VK_ESCAPE) & 0x8000) {
                  if (!escHeld) {
-                     currentState = STATE_MENU;
+                     g_gameState = STATE_MENU;
                      escHeld = true;
                  }
             } else escHeld = false;
             
             Sleep(10);
         }
-        else if (currentState == STATE_LEADERBOARD) {
+        else if (g_gameState == STATE_LEADERBOARD) {
             static int hoverIdx = -1;
             draw_leaderboard(leaderboardButtons, BTN_LEADERBOARD_COUNT, hoverIdx);
             
             if (handle_mouse_menu(leaderboardButtons, BTN_LEADERBOARD_COUNT, &hoverIdx)) {
-                if (hoverIdx == 0) currentState = STATE_MENU;
+                if (hoverIdx == 0) g_gameState = STATE_MENU;
                 Sleep(200);
             }
             
             if (GetAsyncKeyState(VK_ESCAPE) & 0x8000) {
                  if (!escHeld) {
-                     currentState = STATE_MENU;
+                     g_gameState = STATE_MENU;
                      escHeld = true;
                  }
             } else escHeld = false;
             
             Sleep(10);
         }
-        else if (currentState == STATE_SETTINGS) {
+        else if (g_gameState == STATE_SETTINGS) {
             static int hoverIdx = -1;
             update_settings_buttons();
             draw_settings(settingsButtons, BTN_SETTINGS_COUNT, hoverIdx);
@@ -655,7 +717,7 @@ int main() {
                 break;
             case 6: // 返回
                 save_settings(); // 保存所有设置（包括滑块变动）
-                currentState = STATE_MENU;
+                g_gameState = STATE_MENU;
                 break;
         }
         Sleep(200);
@@ -664,64 +726,84 @@ int main() {
             if (GetAsyncKeyState(VK_ESCAPE) & 0x8000) {
                  if (!escHeld) {
                      save_settings(); // 退出设置时保存
-                     currentState = STATE_MENU;
+                     g_gameState = STATE_MENU;
                      escHeld = true;
                  }
             } else escHeld = false;
             
             Sleep(10);
         }
-        else if (currentState == STATE_GAME_SINGLE || currentState == STATE_GAME_DUAL) {
+        else if (g_gameState == STATE_GAME_SINGLE || g_gameState == STATE_GAME_DUAL || g_gameState == STATE_GAME_LEVEL) {
             static bool justEntered = true;
-            if (justEntered) {
-                init_player(&p1, 1);
+            // 如果是 STATE_GAME_LEVEL，通常由选关界面进入，已经初始化了，所以这里只需要处理 SINGLE/DUAL 的初始化
+            // 或者用一个标志位
+            
+            if (g_gameState != STATE_GAME_LEVEL && justEntered) {
+                init_player(&g_player1, 1);
                 if (selectedMode == MODE_DUAL) {
-                    init_player(&p2, 2);
+                    init_player(&g_player2, 2);
                 }
                 gameStartTime = clock();
                 justEntered = false;
             }
+            
+            // 对于 STATE_GAME_LEVEL，justEntered 应该在进入状态前被重置，或者在状态切换时处理
+            // 这里为了简单，假设选关界面进入时已经做好了初始化，我们只需要确保不重复初始化
+            // 选关界面直接切换状态，所以这里不需要再 init
+            // 但如果从 GameOver 重启 Level，需要处理
             
             // 检测暂停 (Space)
             if (GetAsyncKeyState(VK_SPACE) & 0x8000) {
                 if (!spaceHeld) {
                     // 切换暂停状态
                     if (selectedMode == MODE_DUAL) {
-                        p1.isPaused = !p1.isPaused;
-                        p2.isPaused = !p2.isPaused;
+                        g_player1.isPaused = !g_player1.isPaused;
+                        g_player2.isPaused = !g_player2.isPaused;
                     } else {
-                        p1.isPaused = !p1.isPaused;
+                        g_player1.isPaused = !g_player1.isPaused;
                     }
                     spaceHeld = true;
                 }
             } else spaceHeld = false;
             
             // 只有在未暂停时才处理输入和游戏逻辑
-            bool isPaused = (selectedMode == MODE_DUAL) ? (p1.isPaused || p2.isPaused) : p1.isPaused;
+            bool isPaused = (selectedMode == MODE_DUAL) ? (g_player1.isPaused || g_player2.isPaused) : g_player1.isPaused;
             
             if (!isPaused) {
-                handle_input(&p1, (selectedMode == MODE_DUAL) ? &p2 : NULL, selectedMode);
-                update_game(&p1);
-                if (selectedMode == MODE_DUAL) update_game(&p2);
+                handle_input(&g_player1, (selectedMode == MODE_DUAL) ? &g_player2 : NULL, selectedMode);
+                update_game(&g_player1);
+                if (selectedMode == MODE_DUAL) update_game(&g_player2);
                 pauseHoverIdx = -1; // 重置悬停状态
             } else {
                 // 暂停时处理鼠标交互
                 if (handle_mouse_menu(pauseButtons, BTN_PAUSE_COUNT, &pauseHoverIdx)) {
                     switch (pauseHoverIdx) {
                         case 0: // 继续游戏
-                            p1.isPaused = false;
-                            if (selectedMode == MODE_DUAL) p2.isPaused = false;
+                            g_player1.isPaused = false;
+                            if (selectedMode == MODE_DUAL) g_player2.isPaused = false;
                             break;
                         case 1: // 重新开始
-                            justEntered = true; // 重新初始化
-                            p1.isPaused = false;
-                            if (selectedMode == MODE_DUAL) p2.isPaused = false;
+                            if (g_gameState == STATE_GAME_LEVEL) {
+                                // 关卡模式重启：重新初始化当前关卡
+                                init_player(&g_player1, 1);
+                                g_player1.currentLevelIndex = g_player1.currentLevelIndex; // 保持 ID
+                                g_player1.levelTargetLines = g_levels[g_player1.currentLevelIndex].targetLines;
+                                generate_level_garbage(&g_player1, (LevelID)g_player1.currentLevelIndex);
+                            } else {
+                                justEntered = true; // 普通模式重启
+                            }
+                            g_player1.isPaused = false;
+                            if (selectedMode == MODE_DUAL) g_player2.isPaused = false;
                             break;
                         case 2: // 返回菜单
-                            currentState = STATE_MENU;
+                            if (g_gameState == STATE_GAME_LEVEL) {
+                                g_gameState = STATE_LEVEL_SELECT; // 关卡模式返回选关
+                            } else {
+                                g_gameState = STATE_MENU;
+                            }
                             justEntered = true;
-                            p1.isPaused = false;
-                            if (selectedMode == MODE_DUAL) p2.isPaused = false;
+                            g_player1.isPaused = false;
+                            if (selectedMode == MODE_DUAL) g_player2.isPaused = false;
                             break;
                     }
                     Sleep(200);
@@ -731,27 +813,31 @@ int main() {
             // 检测退出 (ESC) -> 返回菜单
             if (GetAsyncKeyState(VK_ESCAPE) & 0x8000) {
                 if (!escHeld) {
-                    currentState = STATE_MENU;
+                    if (g_gameState == STATE_GAME_LEVEL) {
+                        g_gameState = STATE_LEVEL_SELECT;
+                    } else {
+                        g_gameState = STATE_MENU;
+                    }
                     justEntered = true; 
                     escHeld = true;
                     // 重置暂停
-                    p1.isPaused = false; 
-                    if (selectedMode == MODE_DUAL) p2.isPaused = false;
+                    g_player1.isPaused = false; 
+                    if (selectedMode == MODE_DUAL) g_player2.isPaused = false;
                 }
             } else escHeld = false;
             
             // 检测胜负/结束
-            if (selectedMode == MODE_SINGLE) {
-                if (p1.isGameOver) {
-                    add_to_leaderboard(p1.score);
-                    currentState = STATE_GAMEOVER;
+            if (selectedMode == MODE_SINGLE || selectedMode == MODE_LEVEL) {
+                if (g_player1.isGameOver) {
+                    if (selectedMode == MODE_SINGLE) add_to_leaderboard(g_player1.score);
+                    g_gameState = STATE_GAMEOVER;
                 }
-            } else {
+            } else { // DUAL
                 clock_t now = clock();
                 int elapsedSec = (int)((now - gameStartTime) / CLOCKS_PER_SEC);
                 
-                // 暂停补偿：简单处理，暂停时时间继续走，但可以通过增加 starttime 来抵消
-                if (p1.isPaused) {
+                // 暂停补偿
+                if (g_player1.isPaused) {
                     gameStartTime += 16; 
                 }
 
@@ -765,18 +851,18 @@ int main() {
                 
                 // 只有在有限时模式下才检查超时
                 if (g_dualTimeLimit != -1 && timeLeft <= 0) {
-                    if (p1.score > p2.score) { p1.isWinner = true; p2.isWinner = false; }
-                    else if (p2.score > p1.score) { p2.isWinner = true; p1.isWinner = false; }
-                    else { p1.isWinner = false; p2.isWinner = false; } // 平局
-                    currentState = STATE_GAMEOVER;
+                    if (g_player1.score > g_player2.score) { g_player1.isWinner = true; g_player2.isWinner = false; }
+                    else if (g_player2.score > g_player1.score) { g_player2.isWinner = true; g_player1.isWinner = false; }
+                    else { g_player1.isWinner = false; g_player2.isWinner = false; } // 平局
+                    g_gameState = STATE_GAMEOVER;
                 }
-                else if (p1.isGameOver) {
-                    p2.isWinner = true; p1.isWinner = false;
-                    currentState = STATE_GAMEOVER;
+                else if (g_player1.isGameOver) {
+                    g_player2.isWinner = true; g_player1.isWinner = false;
+                    g_gameState = STATE_GAMEOVER;
                 }
-                else if (p2.isGameOver) {
-                    p1.isWinner = true; p2.isWinner = false;
-                    currentState = STATE_GAMEOVER;
+                else if (g_player2.isGameOver) {
+                    g_player1.isWinner = true; g_player2.isWinner = false;
+                    g_gameState = STATE_GAMEOVER;
                 }
             }
             
@@ -793,19 +879,23 @@ int main() {
                 }
             }
             
-            if (currentState != STATE_GAMEOVER) {
-                render_game(&p1, (selectedMode == MODE_DUAL) ? &p2 : NULL, selectedMode, timeLeft, elapsedSec, pauseButtons, BTN_PAUSE_COUNT, pauseHoverIdx);
+            if (g_gameState != STATE_GAMEOVER && g_gameState != STATE_GAME_LEVEL_WIN) {
+                render_game(&g_player1, (selectedMode == MODE_DUAL) ? &g_player2 : NULL, selectedMode, timeLeft, elapsedSec, pauseButtons, BTN_PAUSE_COUNT, pauseHoverIdx);
                 Sleep(16);
             } else {
                 justEntered = true; 
             }
         }
-        else if (currentState == STATE_GAMEOVER) {
-            draw_game_over(&p1, (selectedMode == MODE_DUAL) ? &p2 : NULL, selectedMode);
+        else if (g_gameState == STATE_GAMEOVER) {
+            draw_game_over(&g_player1, (selectedMode == MODE_DUAL) ? &g_player2 : NULL, selectedMode);
             
             if (GetAsyncKeyState(VK_ESCAPE) & 0x8000) {
                 if (!escHeld) {
-                    currentState = STATE_MENU;
+                    if (selectedMode == MODE_LEVEL) {
+                        g_gameState = STATE_LEVEL_SELECT;
+                    } else {
+                        g_gameState = STATE_MENU;
+                    }
                     escHeld = true;
                 }
             } else escHeld = false;
@@ -814,15 +904,50 @@ int main() {
                 if (!enterHeld) {
                     // 重启相同模式
                     if (selectedMode == MODE_SINGLE) {
-                        currentState = STATE_GAME_SINGLE;
+                        g_gameState = STATE_GAME_SINGLE;
+                    } else if (selectedMode == MODE_LEVEL) {
+                        // 重试当前关卡
+                         start_level(&g_player1, 1, g_player1.currentLevelIndex);
+                         g_gameState = STATE_GAME_LEVEL;
                     } else {
-                        // 双人模式重启时，是否需要重新选时间？通常重启意味着用相同设置再来一局
-                        // 所以直接进入 STATE_GAME_DUAL，保留当前的 g_dualTimeLimit
-                        currentState = STATE_GAME_DUAL;
+                        g_gameState = STATE_GAME_DUAL;
                     }
                     enterHeld = true;
                 }
             } else enterHeld = false;
+            
+            Sleep(50);
+        }
+        else if (g_gameState == STATE_GAME_LEVEL_WIN) {
+            // 关卡胜利状态
+            render_game(&g_player1, NULL, MODE_LEVEL, 0, 0, NULL, 0, -1); // 继续渲染游戏画面（此时 render_game 会画 overlay）
+            
+            if (GetAsyncKeyState(VK_RETURN) & 0x8000) {
+                if (!enterHeld) {
+                    // 进入下一关
+                    // currentLevelIndex 已经在 logic 中更新了吗？ logic 只负责解锁下一关
+                    // 这里我们手动切换
+                    int nextId = g_player1.currentLevelIndex + 1;
+                    if (nextId < LEVEL_COUNT) {
+                         init_player(&g_player1, 1);
+                         g_player1.currentLevelIndex = nextId;
+                         g_player1.levelTargetLines = g_levels[nextId].targetLines;
+                         generate_level_garbage(&g_player1, (LevelID)nextId);
+                         g_gameState = STATE_GAME_LEVEL;
+                    } else {
+                        // 全部通关
+                        g_gameState = STATE_LEVEL_SELECT; // 或者显示通关画面
+                    }
+                    enterHeld = true;
+                }
+            } else enterHeld = false;
+            
+            if (GetAsyncKeyState(VK_ESCAPE) & 0x8000) {
+                if (!escHeld) {
+                    g_gameState = STATE_LEVEL_SELECT;
+                    escHeld = true;
+                }
+            } else escHeld = false;
             
             Sleep(50);
         }

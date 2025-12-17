@@ -54,14 +54,19 @@ typedef enum {
     STATE_SETTINGS,     // 设置
     STATE_LEADERBOARD,  // 排行榜
     STATE_TIME_SELECT,  // 双人模式时间选择
+    STATE_LEVEL_SELECT, // 关卡选择 (新增)
+    STATE_STORY,        // 剧情查看 (新增)
     STATE_GAME_SINGLE,  // 单人游戏
     STATE_GAME_DUAL,    // 双人对战
+    STATE_GAME_LEVEL,   // 关卡模式游戏 (新增)
+    STATE_GAME_LEVEL_WIN, // 关卡模式胜利 (新增)
     STATE_GAMEOVER      // 游戏结束
 } GameState;
 
 typedef enum {
     MODE_SINGLE, // 单人模式
-    MODE_DUAL    // 双人模式
+    MODE_DUAL,   // 双人模式
+    MODE_LEVEL   // 关卡模式 (新增)
 } GameMode;
 
 // 设置相关
@@ -82,6 +87,10 @@ typedef struct {
     int bgOpacity;                   // 背景不透明度 (0-100)
     int musicVolume;                 // 音乐音量 (0-1000)
     
+    // 关卡进度
+    int maxUnlockedLevel;            // 当前解锁的最大关卡索引 (0-based)
+    int maxUnlockedStoryLevel;       // 当前解锁的最大剧情关卡索引 (0-based)
+
     // 窗口大小缓存
     int windowWidth;
     int windowHeight;
@@ -152,6 +161,12 @@ typedef struct {
     clock_t lastDropTime;
     int dropInterval;
     bool isPaused; // 暂停状态
+    
+    // 关卡模式特定状态
+    int currentLevelIndex; // 当前进行的关卡索引
+    int levelTargetLines;  // 关卡目标行数
+    bool restrictPieces;   // 是否限制方块类型 (只生成 Z/S)
+    clock_t levelStartTime; // 关卡开始时间 (用于标题动画)
     
     // 按键状态跟踪
     KeyState keyLeft;

@@ -1,6 +1,8 @@
-#include "input.h"
-#include "game_logic.h"
-#include "renderer.h" // for is_mouse_over
+#include "include/input.h"
+#include "include/game_logic.h"
+#include "include/renderer.h" // for is_mouse_over
+#include "include/levels.h" // 引入 LevelID 和 LevelData 定义
+#include "include/tetromino.h" // 引入 spawn_block 声明
 
 // 按键状态跟踪，用于“按一次触发一次”的动作（如旋转）
 static bool p1_rotate_held = false;
@@ -45,12 +47,38 @@ bool update_key_state(KeyState* state, int vKey, clock_t now, int das, int arr) 
     return false;
 }
 
+// R键重开检测
+static bool r_key_held = false;
+
+extern void init_player(PlayerState *p, int id); // 重新初始化玩家声明
+extern GameState g_gameState; // 全局状态
+extern LevelData g_levels[]; // 关卡数据
+
 void handle_input(PlayerState *p1, PlayerState *p2, GameMode mode) {
     clock_t now = clock();
 
-    if (mode == MODE_SINGLE) {
-        // --- 单人模式 ---
-        if (!p1->isGameOver) {
+    if (mode == MODE_SINGLE || mode == MODE_LEVEL) {
+        // --- 单人模式 或 关卡模式 ---
+        
+        // R键重开逻辑
+        if (GetAsyncKeyState('R') & 0x8000) {
+            if (!r_key_held && !p1->isGameOver && !p1->isWinner && !p1->isPaused) {
+                // 执行重开
+                if (mode == MODE_LEVEL) {
+                    // 关卡模式：使用 start_level 统一初始化 (包含 restrictPieces 处理)
+                    start_level(p1, 1, p1->currentLevelIndex);
+                } else {
+                    // 普通模式
+                    init_player(p1, 1);
+                }
+                
+                r_key_held = true;
+            }
+        } else {
+            r_key_held = false;
+        }
+
+        if (!p1->isGameOver && !p1->isWinner) {
             // 旋转 (上) - 保持单次触发
             if (GetAsyncKeyState(VK_UP) & 0x8000) {
                 if (!p1_rotate_held) {
@@ -93,31 +121,33 @@ void handle_input(PlayerState *p1, PlayerState *p2, GameMode mode) {
                 p1->keyDrop.isHeld = false;
             }
             
-            // 等级调整 (W/S) - 单次触发
-            // W: 增加等级
-            if (GetAsyncKeyState('W') & 0x8000) {
-                if (!p1_level_up_held) {
-                    if (p1->level < MAX_LEVEL) {
-                        p1->level++;
-                        update_speed(p1);
+            // 等级调整 (W/S) - 仅在普通单人模式下启用，关卡模式禁用
+            if (mode == MODE_SINGLE) {
+                // W: 增加等级
+                if (GetAsyncKeyState('W') & 0x8000) {
+                    if (!p1_level_up_held) {
+                        if (p1->level < MAX_LEVEL) {
+                            p1->level++;
+                            update_speed(p1);
+                        }
+                        p1_level_up_held = true;
                     }
-                    p1_level_up_held = true;
+                } else {
+                    p1_level_up_held = false;
                 }
-            } else {
-                p1_level_up_held = false;
-            }
-            
-            // S: 减少等级
-            if (GetAsyncKeyState('S') & 0x8000) {
-                if (!p1_level_down_held) {
-                    if (p1->level > 1) {
-                        p1->level--;
-                        update_speed(p1);
+                
+                // S: 减少等级
+                if (GetAsyncKeyState('S') & 0x8000) {
+                    if (!p1_level_down_held) {
+                        if (p1->level > 1) {
+                            p1->level--;
+                            update_speed(p1);
+                        }
+                        p1_level_down_held = true;
                     }
-                    p1_level_down_held = true;
+                } else {
+                    p1_level_down_held = false;
                 }
-            } else {
-                p1_level_down_held = false;
             }
         }
     } else {
