@@ -167,6 +167,8 @@ typedef struct {
     int levelTargetLines;  // 关卡目标行数
     bool restrictPieces;   // 是否限制方块类型 (只生成 Z/S)
     clock_t levelStartTime; // 关卡开始时间 (用于标题动画)
+    clock_t lastScrambleTime; // 上次重置棋盘时间 (OS-1)
+    clock_t lastShapeChangeTime; // 上次形状改变时间 (OS-2)
     
     // 按键状态跟踪
     KeyState keyLeft;

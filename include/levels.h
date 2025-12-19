@@ -18,6 +18,8 @@ typedef enum {
     LEVEL_EX_1,
     LEVEL_EX_2,
     LEVEL_EX_3,
+    LEVEL_OS_1,
+    LEVEL_OS_2,
     LEVEL_COUNT
 } LevelID;
 
@@ -33,13 +35,15 @@ typedef enum {
 typedef struct {
     LevelID id;
     TCHAR name[16];           // 如 "PM-1"
-    TCHAR title[32];          // 如 "PM-1 初出茅庐"
-    TCHAR story[1024];        // 剧情文本
+    TCHAR title[32];          // 如 "PM-1 xxxx"
+    TCHAR story[4096];        // 剧情文本
     
     int targetLines;         // 目标消除行数
     int initialGarbageRows;  // 初始垃圾行数
     GarbageType garbageType; // 垃圾行类型
     bool restrictPieces;     // 是否仅生成 Z/S (针对 EX-3)
+    bool periodicReset;      // 周期性重置棋盘 (PM-OS-1)
+    bool unstablePieces;     // 不稳定方块 (PM-OS-2)
     
     bool isUnlocked;         // 是否已解锁
     bool isCompleted;        // 是否已通关

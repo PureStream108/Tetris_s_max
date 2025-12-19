@@ -244,7 +244,7 @@ void draw_info(PlayerState *p, int startX, int startY) {
     if (g_gameState == STATE_GAME_LEVEL) {
         int left = p->levelTargetLines - p->linesCleared;
         if (left < 0) left = 0;
-        _stprintf_s(buf, 64, _T("Target Left: %d"), left);
+        _stprintf_s(buf, 64, _T("Left: %d"), left);
         outtextxy(startX, startY + 60, buf);
     } else {
         _stprintf_s(buf, 64, _T("Lines: %d"), p->linesCleared);
@@ -349,7 +349,19 @@ void render_game(PlayerState *p1, PlayerState *p2, GameMode mode, int timeLeft, 
     
     bool isPaused = false;
     
-    if (mode == MODE_SINGLE || mode == MODE_LEVEL) { // 单人或关卡模式
+    // 检查是否为 OS-3 (双人控制) - 已删除
+    /*
+    bool isDualControl = false;
+    if (mode == MODE_LEVEL) {
+        LevelData* level = get_level_data((LevelID)p1->currentLevelIndex);
+        if (level && level->dualControl) {
+            isDualControl = true;
+        }
+    }
+    */
+    bool isDualControl = false; // 强制为 false
+    
+    if ((mode == MODE_SINGLE || mode == MODE_LEVEL) && !isDualControl) { // 单人或关卡模式
         draw_board(p1, sp_x, sp_y);
         draw_info(p1, sp_x + BOARD_COLS * g_blockSize + 20, sp_y);
         
@@ -401,7 +413,8 @@ void render_game(PlayerState *p1, PlayerState *p2, GameMode mode, int timeLeft, 
         }
 
     } else {
-        // 双人模式布局调整：完全基于窗口宽度的百分比，适应任何分辨率
+        // 双人模式布局调整 (或 OS-3)
+        // 完全基于窗口宽度的百分比，适应任何分辨率
         int boardWidth = BOARD_COLS * g_blockSize;
         
         // P1: 居中于左侧 25% 区域
@@ -416,20 +429,32 @@ void render_game(PlayerState *p1, PlayerState *p2, GameMode mode, int timeLeft, 
         draw_info(p1, p1_final_x - 140, sp_y); 
         
         // P2 信息栏在棋盘右侧
-        draw_board(p2, p2_final_x, sp_y);
-        draw_info(p2, p2_final_x + boardWidth + 20, sp_y);
-        
-        // 显示时间
-        TCHAR timeBuf[32];
-        if (timeLeft == -1) {
-            _stprintf_s(timeBuf, 32, _T("Time: ∞"));
-        } else {
-            _stprintf_s(timeBuf, 32, _T("Time: %ds"), timeLeft);
+        if (p2) {
+             draw_board(p2, p2_final_x, sp_y);
+             draw_info(p2, p2_final_x + boardWidth + 20, sp_y);
         }
         
-        settextstyle(30, 0, _T("SimHei"));
-        settextcolor(LIGHTRED);
-        outtextxy(g_windowWidth / 2 - 60, 20, timeBuf);
+        // 显示时间 (仅在非 OS-3 模式下显示对战时间，OS-3 显示其他信息或不显示时间)
+        if (!isDualControl) {
+            TCHAR timeBuf[32];
+            if (timeLeft == -1) {
+                _stprintf_s(timeBuf, 32, _T("Time: ∞"));
+            } else {
+                _stprintf_s(timeBuf, 32, _T("Time: %ds"), timeLeft);
+            }
+            
+            settextstyle(30, 0, _T("SimHei"));
+            settextcolor(LIGHTRED);
+            outtextxy(g_windowWidth / 2 - 60, 20, timeBuf);
+        } else {
+            // OS-3 标题 (已删除)
+            /*
+            settextstyle(30, 0, _T("SimHei"));
+            settextcolor(YELLOW);
+            const TCHAR* title = _T("PM-OS-3 同调");
+            outtextxy((g_windowWidth - textwidth(title)) / 2, 20, title);
+            */
+        }
         
         if (p1->isPaused || (p2 && p2->isPaused)) isPaused = true;
     }

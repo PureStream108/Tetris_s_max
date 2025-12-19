@@ -60,6 +60,9 @@ void handle_input(PlayerState *p1, PlayerState *p2, GameMode mode) {
     if (mode == MODE_SINGLE || mode == MODE_LEVEL) {
         // --- 单人模式 或 关卡模式 ---
         
+        // bool isMirrorMode = (mode == MODE_LEVEL && p2 != NULL); 
+        bool isMirrorMode = false;
+        
         // R键重开逻辑
         if (GetAsyncKeyState('R') & 0x8000) {
             if (!r_key_held && !p1->isGameOver && !p1->isWinner && !p1->isPaused) {
@@ -83,6 +86,7 @@ void handle_input(PlayerState *p1, PlayerState *p2, GameMode mode) {
             if (GetAsyncKeyState(VK_UP) & 0x8000) {
                 if (!p1_rotate_held) {
                     rotate_block_action(p1);
+                    if (isMirrorMode && !p2->isGameOver) rotate_block_action(p2);
                     p1_rotate_held = true;
                 }
             } else {
@@ -92,9 +96,11 @@ void handle_input(PlayerState *p1, PlayerState *p2, GameMode mode) {
             // 移动 左/右 (DAS/ARR)
             if (update_key_state(&p1->keyLeft, VK_LEFT, now, DAS_DELAY, ARR_DELAY)) {
                 move_block(p1, -1, 0);
+                if (isMirrorMode && !p2->isGameOver) move_block(p2, -1, 0);
             }
             if (update_key_state(&p1->keyRight, VK_RIGHT, now, DAS_DELAY, ARR_DELAY)) {
                 move_block(p1, 1, 0);
+                if (isMirrorMode && !p2->isGameOver) move_block(p2, 1, 0);
             }
 
             // 下落逻辑：软下落 (DAS/ARR) + 硬下落 (双击)
@@ -103,6 +109,7 @@ void handle_input(PlayerState *p1, PlayerState *p2, GameMode mode) {
                     // 按下瞬间检测双击
                     if (now - p1_last_down_press < DOUBLE_TAP_THRESHOLD) {
                         hard_drop(p1);
+                        if (isMirrorMode && !p2->isGameOver) hard_drop(p2);
                         p1_last_down_press = 0; // 重置
                         // 硬下落后通常不应立即触发软下落，这里简单处理即可
                     } else {
@@ -114,6 +121,7 @@ void handle_input(PlayerState *p1, PlayerState *p2, GameMode mode) {
                 // 注意：软下落通常 DAS 较短或没有，这里沿用标准 DAS
                 if (update_key_state(&p1->keyDown, VK_DOWN, now, DAS_DELAY, SOFT_DROP_ARR)) {
                     move_block(p1, 0, 1);
+                    if (isMirrorMode && !p2->isGameOver) move_block(p2, 0, 1);
                 }
                 p1->keyDrop.isHeld = true;
             } else {

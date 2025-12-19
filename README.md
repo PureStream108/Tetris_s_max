@@ -20,3 +20,7 @@ g++ main.c renderer.c game_logic.c input.c tetromino.c levels.c scene_level_sele
 
 ## 注意事项
 打开exe之后有两个窗口，关闭游戏时记得都关闭！第一次打开时记得关闭音量
+
+## 替换默认音乐/图片
+
+将自己的mp3/图片替换掉目录下的第一首/张，然后点击设置默认音乐/图片按钮即可

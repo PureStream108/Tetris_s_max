@@ -77,6 +77,43 @@ void start_level(PlayerState *p, int playerId, int levelId) {
     
     // 4. 生成关卡地形
     generate_level_garbage(p, (LevelID)levelId);
+
+    // 5. 特殊机制初始化
+    p->lastScrambleTime = clock(); // 用于 OS-1
+    p->lastShapeChangeTime = clock(); // 用于 OS-2
+}
+
+// 随机重置棋盘 (PM-OS-1: 保持行数不变，重新随机填充)
+void scramble_board(PlayerState *p) {
+    for (int r = 0; r < BOARD_ROWS; r++) {
+        // 统计当前行有多少个方块
+        int blockCount = 0;
+        for (int c = 0; c < BOARD_COLS; c++) {
+            if (p->board[r][c] != 0) {
+                blockCount++;
+            }
+        }
+
+        // 如果该行有方块，则重新随机分配位置
+        if (blockCount > 0) {
+            // 清空该行
+            for (int c = 0; c < BOARD_COLS; c++) {
+                p->board[r][c] = 0;
+                p->boardColors[r][c] = BLACK;
+            }
+
+            // 随机填充 blockCount 个方块
+            int placed = 0;
+            while (placed < blockCount) {
+                int c = rand() % BOARD_COLS;
+                if (p->board[r][c] == 0) {
+                    p->board[r][c] = 1;
+                    p->boardColors[r][c] = RGB(100, 100, 100);
+                    placed++;
+                }
+            }
+        }
+    }
 }
 
 // 检查特定方块状态的碰撞
@@ -236,6 +273,34 @@ void update_game(PlayerState *p) {
     }
     
     clock_t now = clock();
+
+    // --- PM-OS-1: 周期性重置 ---
+    LevelData* levelData = get_level_data((LevelID)p->currentLevelIndex);
+    if (g_gameState == STATE_GAME_LEVEL && levelData && levelData->periodicReset) {
+        if (now - p->lastScrambleTime > 15000) { // 15秒 (15000ms)
+            scramble_board(p);
+            p->lastScrambleTime = now;
+        }
+    }
+
+    // --- PM-OS-2: 不稳定方块 ---
+    if (g_gameState == STATE_GAME_LEVEL && levelData && levelData->unstablePieces) {
+        if (now - p->lastShapeChangeTime > 1500) { 
+            Block temp = p->currentBlock;
+            // 生成一个新的随机形状
+            spawn_block(&temp, false); 
+            // 保持位置
+            temp.x = p->currentBlock.x;
+            temp.y = p->currentBlock.y;
+            
+            // 尝试应用新形状 (如果不碰撞)
+            if (!check_collision(p, &temp)) {
+                p->currentBlock = temp;
+            }
+            p->lastShapeChangeTime = now;
+        }
+    }
+
     if (now - p->lastDropTime > p->dropInterval) {
         // 尝试下落
         if (!move_block(p, 0, 1)) {

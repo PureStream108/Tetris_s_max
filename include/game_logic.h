@@ -22,6 +22,9 @@ bool check_game_over(PlayerState *p);
 // 根据等级更新下落速度
 void update_speed(PlayerState *p);
 
+// 随机重置棋盘 (PM-OS-1)
+void scramble_board(PlayerState *p);
+
 void load_leaderboard();
 void save_leaderboard();
 void add_to_leaderboard(int score);

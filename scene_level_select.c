@@ -17,6 +17,8 @@ static int startMapOffsetY = 0;
 // 确认弹窗状态
 static bool showConfirmDialog = false;
 static LevelID selectedLevelID = LEVEL_1;
+static int lastMx = 0;
+static int lastMy = 0;
 
 // 按钮定义
 static Button btnBack = {20, 20, 100, 40, _T("返回")};
@@ -48,11 +50,15 @@ void draw_level_select() {
     draw_background();
     draw_dim_overlay(100);
 
-    // 1. 绘制连接线 (先画线，在方块下面)
+    // 绘制连接线 (先画线，在方块下面)
     setlinestyle(PS_SOLID, 3);
     for (int i = 0; i < LEVEL_COUNT - 1; i++) {
-        // PM-EX 系列可能需要特殊连接处理，这里简单地按顺序连接
+        // 断开 PM-EX-3 (Index 12) 和 PM-OS-1 (Index 13) 之间的连线
+        if (i == LEVEL_EX_3) continue;
         
+        // 断开 PM-OS-2 和下一个（不存在的）之间的连线 (防止溢出或错误连线)
+        if (i == LEVEL_OS_2) continue;
+
         int x1 = g_levels[i].mapX + mapOffsetX;
         int y1 = g_levels[i].mapY + mapOffsetY;
         int x2 = g_levels[i+1].mapX + mapOffsetX;
@@ -74,7 +80,7 @@ void draw_level_select() {
         line(x1, y1, x2, y2);
     }
 
-    // 2. 绘制关卡节点
+    // 绘制关卡节点
     for (int i = 0; i < LEVEL_COUNT; i++) {
         int x = g_levels[i].mapX + mapOffsetX;
         int y = g_levels[i].mapY + mapOffsetY;
@@ -122,7 +128,7 @@ void draw_level_select() {
         outtextxy(x + (w - textW) / 2, y + (h - textH) / 2, wName);
     }
 
-    // 3. 绘制UI按钮 (固定在屏幕上)
+    // 绘制UI按钮 (固定在屏幕上)
     draw_button(&btnBack, false);
     
     // 更新剧情按钮位置
@@ -134,11 +140,10 @@ void draw_level_select() {
     draw_button(&btnReset, false);
     draw_button(&btnUnlockAll, false);
 
-    // 4. 绘制确认弹窗
+    // 绘制确认弹窗
     if (showConfirmDialog) {
         // 半透明遮罩
         setfillcolor(RGB(0, 0, 0));
-        // 注意：EasyX 不支持直接的 alpha blend fill，这里用网格模拟或者直接画一个深色框
         // 既然之前实现了 dim overlay，这里直接画个框吧
         
         int boxW = 400;
@@ -202,6 +207,12 @@ extern PlayerState g_player1; // 需要访问 g_player1 来设置状态
 extern void save_settings();
 
 void handle_level_select_input(ExMessage *msg) {
+    // 始终更新鼠标位置
+    if (msg->message == WM_MOUSEMOVE) {
+        lastMx = msg->x;
+        lastMy = msg->y;
+    }
+
     if (msg->message == WM_LBUTTONDOWN) {
         if (showConfirmDialog) {
             if (is_button_clicked(&btnConfirmYes, msg->x, msg->y)) {
@@ -287,9 +298,6 @@ void handle_level_select_input(ExMessage *msg) {
             int dy = msg->y - dragStartY;
             mapOffsetX = startMapOffsetX + dx;
             mapOffsetY = startMapOffsetY + dy;
-            
-            // 限制拖拽范围 (可选)
-            // if (mapOffsetX > 100) mapOffsetX = 100;
         }
     }
 }

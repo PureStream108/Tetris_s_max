@@ -38,7 +38,7 @@ PlayerState g_player2; // 仅用于双人
 Button menuButtons[BTN_MENU_COUNT] = {
     {0, 300, 300, 50, _T("单人游戏 (1 Player)")},
     {0, 370, 300, 50, _T("双人对战 (2 Players)")},
-    {0, 440, 300, 50, _T("关卡模式 (Level Mode)")},
+    {0, 440, 300, 50, _T("关卡模式 (DLC)")},
     {0, 510, 300, 50, _T("排行榜 (Leaderboard)")},
     {0, 580, 300, 50, _T("设置 (Settings)")},
     {0, 650, 300, 50, _T("退出 (Exit)")}
@@ -197,8 +197,6 @@ void load_settings() {
         fread(&g_settings, sizeof(GameSettings), 1, f);
         fclose(f);
         
-        // [FIX] 强制修正旧的默认值 (1000/100 -> 150/26)
-        // 扩大判断范围：因为用户反馈显示 99% (即 ~990)，说明可能并非严格等于 1000
         // 只要检测到音量过大且不透明度过高，就认为是旧配置，强制重置
         if (g_settings.musicVolume >= 900 && g_settings.bgOpacity >= 90) {
             g_settings.musicVolume = 150;
@@ -313,8 +311,7 @@ void scan_icon_folder() {
     
     do {
         if (!(findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
-            // 检查扩展名 (支持 .ico, .png, .jpg)
-            // 注意：LoadImage 最好用 .ico，但我们会尝试加载图片
+            // 请使用ico
             TCHAR* ext = _tcsrchr(findData.cFileName, '.');
             if (ext) {
                 // 构造路径
@@ -446,7 +443,6 @@ bool handle_settings_mouse(Button* buttons, int count, int* hoverIndex) {
 }
 
 int main() {
-    // [FIX] 设置当前工作目录为 exe 所在目录，彻底解决相对路径资源加载问题
     TCHAR exePath[MAX_PATH_LEN];
     if (GetModuleFileName(NULL, exePath, MAX_PATH_LEN)) {
         TCHAR* lastSlash = _tcsrchr(exePath, '\\');
@@ -740,9 +736,11 @@ int main() {
             
             if (g_gameState != STATE_GAME_LEVEL && justEntered) {
                 init_player(&g_player1, 1);
+                // 恢复为仅在 MODE_DUAL 初始化 P2
                 if (selectedMode == MODE_DUAL) {
                     init_player(&g_player2, 2);
                 }
+                
                 gameStartTime = clock();
                 justEntered = false;
             }
@@ -770,9 +768,11 @@ int main() {
             bool isPaused = (selectedMode == MODE_DUAL) ? (g_player1.isPaused || g_player2.isPaused) : g_player1.isPaused;
             
             if (!isPaused) {
+                // 恢复标准逻辑
                 handle_input(&g_player1, (selectedMode == MODE_DUAL) ? &g_player2 : NULL, selectedMode);
                 update_game(&g_player1);
                 if (selectedMode == MODE_DUAL) update_game(&g_player2);
+                
                 pauseHoverIdx = -1; // 重置悬停状态
             } else {
                 // 暂停时处理鼠标交互
@@ -789,6 +789,7 @@ int main() {
                                 g_player1.currentLevelIndex = g_player1.currentLevelIndex; // 保持 ID
                                 g_player1.levelTargetLines = g_levels[g_player1.currentLevelIndex].targetLines;
                                 generate_level_garbage(&g_player1, (LevelID)g_player1.currentLevelIndex);
+                                
                             } else {
                                 justEntered = true; // 普通模式重启
                             }
@@ -827,42 +828,62 @@ int main() {
             } else escHeld = false;
             
             // 检测胜负/结束
-            if (selectedMode == MODE_SINGLE || selectedMode == MODE_LEVEL) {
+            bool isOS3 = false; // 强制关闭
+
+            if ((selectedMode == MODE_SINGLE || selectedMode == MODE_LEVEL) && !isOS3) {
                 if (g_player1.isGameOver) {
                     if (selectedMode == MODE_SINGLE) add_to_leaderboard(g_player1.score);
                     g_gameState = STATE_GAMEOVER;
                 }
-            } else { // DUAL
-                clock_t now = clock();
-                int elapsedSec = (int)((now - gameStartTime) / CLOCKS_PER_SEC);
-                
-                // 暂停补偿
-                if (g_player1.isPaused) {
-                    gameStartTime += 16; 
-                }
-
-                // 如果 g_dualTimeLimit 为 -1，则timeLeft 设为 9999 (显示用)，并不触发超时
-                int timeLeft = 0;
-                if (g_dualTimeLimit != -1) {
-                    timeLeft = g_dualTimeLimit - elapsedSec;
+            } else if (selectedMode == MODE_DUAL || isOS3) { // DUAL or OS-3
+                if (isOS3) {
+                    if (g_player1.isWinner && g_player2.isWinner) { 
+                        
+                        // 检查是否都胜利
+                        bool p1Clear = (g_player1.linesCleared >= g_player1.levelTargetLines);
+                        bool p2Clear = (g_player2.linesCleared >= g_player2.levelTargetLines);
+                        
+                        if (p1Clear && p2Clear) {
+                             g_gameState = STATE_GAME_LEVEL_WIN;
+                        }
+                        else if (g_player1.isGameOver || g_player2.isGameOver) {
+                             // 任意一方失败则结束
+                             g_gameState = STATE_GAMEOVER;
+                        }
+                    }
                 } else {
-                    timeLeft = 9999;
-                }
-                
-                // 只有在有限时模式下才检查超时
-                if (g_dualTimeLimit != -1 && timeLeft <= 0) {
-                    if (g_player1.score > g_player2.score) { g_player1.isWinner = true; g_player2.isWinner = false; }
-                    else if (g_player2.score > g_player1.score) { g_player2.isWinner = true; g_player1.isWinner = false; }
-                    else { g_player1.isWinner = false; g_player2.isWinner = false; } // 平局
-                    g_gameState = STATE_GAMEOVER;
-                }
-                else if (g_player1.isGameOver) {
-                    g_player2.isWinner = true; g_player1.isWinner = false;
-                    g_gameState = STATE_GAMEOVER;
-                }
-                else if (g_player2.isGameOver) {
-                    g_player1.isWinner = true; g_player2.isWinner = false;
-                    g_gameState = STATE_GAMEOVER;
+                    // 原有的双人对战逻辑
+                    clock_t now = clock();
+                    int elapsedSec = (int)((now - gameStartTime) / CLOCKS_PER_SEC);
+                    
+                    // 暂停补偿
+                    if (g_player1.isPaused) {
+                        gameStartTime += 16; 
+                    }
+    
+                    // 如果 g_dualTimeLimit 为 -1，则timeLeft 设为 9999 (显示用)，并不触发超时
+                    int timeLeft = 0;
+                    if (g_dualTimeLimit != -1) {
+                        timeLeft = g_dualTimeLimit - elapsedSec;
+                    } else {
+                        timeLeft = 9999;
+                    }
+                    
+                    // 只有在有限时模式下才检查超时
+                    if (g_dualTimeLimit != -1 && timeLeft <= 0) {
+                        if (g_player1.score > g_player2.score) { g_player1.isWinner = true; g_player2.isWinner = false; }
+                        else if (g_player2.score > g_player1.score) { g_player2.isWinner = true; g_player1.isWinner = false; }
+                        else { g_player1.isWinner = false; g_player2.isWinner = false; } // 平局
+                        g_gameState = STATE_GAMEOVER;
+                    }
+                    else if (g_player1.isGameOver) {
+                        g_player2.isWinner = true; g_player1.isWinner = false;
+                        g_gameState = STATE_GAMEOVER;
+                    }
+                    else if (g_player2.isGameOver) {
+                        g_player1.isWinner = true; g_player2.isWinner = false;
+                        g_gameState = STATE_GAMEOVER;
+                    }
                 }
             }
             
@@ -880,7 +901,7 @@ int main() {
             }
             
             if (g_gameState != STATE_GAMEOVER && g_gameState != STATE_GAME_LEVEL_WIN) {
-                render_game(&g_player1, (selectedMode == MODE_DUAL) ? &g_player2 : NULL, selectedMode, timeLeft, elapsedSec, pauseButtons, BTN_PAUSE_COUNT, pauseHoverIdx);
+                render_game(&g_player1, (selectedMode == MODE_DUAL || isOS3) ? &g_player2 : NULL, selectedMode, timeLeft, elapsedSec, pauseButtons, BTN_PAUSE_COUNT, pauseHoverIdx);
                 Sleep(16);
             } else {
                 justEntered = true; 
@@ -908,6 +929,7 @@ int main() {
                     } else if (selectedMode == MODE_LEVEL) {
                         // 重试当前关卡
                          start_level(&g_player1, 1, g_player1.currentLevelIndex);
+                         
                          g_gameState = STATE_GAME_LEVEL;
                     } else {
                         g_gameState = STATE_GAME_DUAL;
@@ -920,7 +942,10 @@ int main() {
         }
         else if (g_gameState == STATE_GAME_LEVEL_WIN) {
             // 关卡胜利状态
-            render_game(&g_player1, NULL, MODE_LEVEL, 0, 0, NULL, 0, -1); // 继续渲染游戏画面（此时 render_game 会画 overlay）
+            // 检查是否为 OS-3 (双人控制)
+            bool isOS3 = false;
+            
+            render_game(&g_player1, isOS3 ? &g_player2 : NULL, MODE_LEVEL, 0, 0, NULL, 0, -1); // 继续渲染游戏画面（此时 render_game 会画 overlay）
             
             if (GetAsyncKeyState(VK_RETURN) & 0x8000) {
                 if (!enterHeld) {
