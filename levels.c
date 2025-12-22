@@ -172,7 +172,7 @@ void init_levels() {
     _stprintf(g_levels[LEVEL_OS_1].name, _T("PM-OS-1"));
     _stprintf(g_levels[LEVEL_OS_1].title, _T("PM-OS-1 行于流逝的岸"));
     _stprintf(g_levels[LEVEL_OS_1].story, _T("")); // 不显示在剧情模式
-    g_levels[LEVEL_OS_1].targetLines = 15;
+    g_levels[LEVEL_OS_1].targetLines = 20; // 降低到 20 行
     g_levels[LEVEL_OS_1].initialGarbageRows = 4;
     g_levels[LEVEL_OS_1].garbageType = GARBAGE_RANDOM;
     g_levels[LEVEL_OS_1].periodicReset = true;
@@ -183,7 +183,7 @@ void init_levels() {
     _stprintf(g_levels[LEVEL_OS_2].name, _T("PM-OS-2"));
     _stprintf(g_levels[LEVEL_OS_2].title, _T("PM-OS-2 游戏尘寰"));
     _stprintf(g_levels[LEVEL_OS_2].story, _T(""));
-    g_levels[LEVEL_OS_2].targetLines = 15;
+    g_levels[LEVEL_OS_2].targetLines = 15; // 降低到 15 行
     g_levels[LEVEL_OS_2].initialGarbageRows = 0;
     g_levels[LEVEL_OS_2].garbageType = GARBAGE_NONE;
     g_levels[LEVEL_OS_2].unstablePieces = true;

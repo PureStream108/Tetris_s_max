@@ -59,8 +59,6 @@ void handle_input(PlayerState *p1, PlayerState *p2, GameMode mode) {
 
     if (mode == MODE_SINGLE || mode == MODE_LEVEL) {
         // --- 单人模式 或 关卡模式 ---
-        
-        // bool isMirrorMode = (mode == MODE_LEVEL && p2 != NULL); 
         bool isMirrorMode = false;
         
         // R键重开逻辑

@@ -285,7 +285,7 @@ void update_game(PlayerState *p) {
 
     // --- PM-OS-2: 不稳定方块 ---
     if (g_gameState == STATE_GAME_LEVEL && levelData && levelData->unstablePieces) {
-        if (now - p->lastShapeChangeTime > 1500) { 
+        if (now - p->lastShapeChangeTime > 1500) {
             Block temp = p->currentBlock;
             // 生成一个新的随机形状
             spawn_block(&temp, false); 
@@ -360,7 +360,7 @@ void add_to_leaderboard(int score) {
     }
     
     // 简单的默认名字
-    strcpy(g_leaderboard.entries[idx].name, "Player");
+    strcpy(g_leaderboard.entries[idx].name, "PureStr34m");
     g_leaderboard.entries[idx].score = score;
     g_leaderboard.entries[idx].date = time(NULL);
     
